@@ -1,7 +1,15 @@
-library(XLConnect)
+# Установка пакетов (если не установлены)
+if (!require("openxlsx")) install.packages("openxlsx")
+if (!require("neuralnet")) install.packages("neuralnet")
+if (!require("NeuralNetTools")) install.packages("NeuralNetTools")
+if (!require("readxl")) install.packages("readxl")
+
+library(readxl)
+library(openxlsx)
 library(neuralnet)
 library(NeuralNetTools)
 
+# Функции
 f <- function(a, b, c, fuz, koef){
   for(i in 1:length(fuz[, 1])){
     if(a < fuz[i, 1] & fuz[i, 1] <= c) {fuz[i, 1] <- round(((fuz[i, 1] - a) / (c - a)), 2) + koef}
@@ -16,57 +24,64 @@ RMSE <- function(a, b, c){
   for(i in 1:c){ 
     arr[i] <- sqrt(mean((a[i] - b[i])^2))
   }
-  View(arr)
+  return(arr)
 }
 
-# ������� ����������� ��� 3 ����������
-fuzz <- function(data, numcol){
-  fuzz_means <- array(0, dim = length(data[,numcol]))
-  fuzz_max <- array(0, dim = length(data[,numcol]))
+# Функция фазификации для интенсивности движения (3 фазы)
+fuzz_intensity <- function(data, numcol){
+  fuzz_low <- array(0, dim = length(data[,numcol]))
+  fuzz_medium <- array(0, dim = length(data[,numcol]))
+  fuzz_high <- array(0, dim = length(data[,numcol]))
+  
   for(f in 1:length(data[,numcol])){
-    if(data[f,numcol] > 1 & data[f,numcol] <= 2){
-      fuzz_means[f] <- 1 # 2
+    if(data[f,numcol] >= 0 & data[f,numcol] < 750){
+      fuzz_low[f] <- 1
       data[f,numcol] <- 0
     }
-    else if(data[f,numcol] > 2 & data[f,numcol] <= 3){
-      fuzz_max[f] <- 1 # 3
+    else if(data[f,numcol] >= 750 & data[f,numcol] < 900){
+      fuzz_medium[f] <- 1
       data[f,numcol] <- 0
     }
-    else {#
-      data[f,numcol] <- 1
+    else if(data[f,numcol] >= 900 & data[f,numcol] <= 2000){
+      fuzz_high[f] <- 1
+      data[f,numcol] <- 0
+    }
+    else {
+      data[f,numcol] <- 0
     }
   }
-  c <- cbind(data[, numcol], fuzz_means, fuzz_max)
+  c <- cbind(data[, numcol], fuzz_low, fuzz_medium, fuzz_high)
   return(c)
 }
 
-# ������� ����������� ��� 4 ����������
-fuzz1 <- function(data, numcol){
-  fuzz_Belmeans <- array(0, dim = length(data[,numcol]))
-  fuzz_Abomeans <- array(0, dim = length(data[,numcol]))
-  fuzz_max <- array(0, dim = length(data[,numcol]))
+# Функция фазификации для времени горения зеленого (3 фазы)
+fuzz_green_time <- function(data, numcol){
+  fuzz_low <- array(0, dim = length(data[,numcol]))
+  fuzz_medium <- array(0, dim = length(data[,numcol]))
+  fuzz_high <- array(0, dim = length(data[,numcol]))
+  
   for(f in 1:length(data[,numcol])){
-    if(data[f,numcol] > 1 & data[f,numcol] <= 2){
-      fuzz_Belmeans[f] <- 1 # 2
+    if(data[f,numcol] >= 0 & data[f,numcol] < 30){
+      fuzz_low[f] <- 1
       data[f,numcol] <- 0
     }
-    else if(data[f,numcol] > 2 & data[f,numcol] <= 3){
-      fuzz_Abomeans[f] <- 1 # 3
+    else if(data[f,numcol] >= 30 & data[f,numcol] < 45){
+      fuzz_medium[f] <- 1
       data[f,numcol] <- 0
     }
-    else if(data[f,numcol] > 3 & data[f,numcol] <= 4) {#
-      fuzz_max[f] <- 1 # 3
+    else if(data[f,numcol] >= 45 & data[f,numcol] <= 120){
+      fuzz_high[f] <- 1
       data[f,numcol] <- 0
     }
-    else {#
-      data[f,numcol] <- 1
+    else {
+      data[f,numcol] <- 0
     }
   }
-  c <- cbind(data[, numcol], fuzz_Belmeans, fuzz_Abomeans, fuzz_max)
+  c <- cbind(data[, numcol], fuzz_low, fuzz_medium, fuzz_high)
   return(c)
 }
 
-# ������� ������������� � ������
+# Функция преобразования в вектор
 vec <- function(data, coff, col){
   p <- array(0, length(data[,1]))
   k <- 0
@@ -79,618 +94,429 @@ vec <- function(data, coff, col){
   return(p)
 }
 
-wd <- loadWorkbook(file.choose(), create = T)
-data <- readWorksheet(wd, sheet = "����1", startRow = 1, endRow = 39, 
-                     startCol = 0, endCol = 9)
-
-# ���������� ������� � ������� ������ � �������� �������� 
-data <- cbind(data, 1:length(data[, 1]))
-colnames(data)[10] <- 'Col-vo'
-
-# ������� � ��������� ��������� ��� Capacity
-cap_min <- min(data[, 9]) - 1000
-cap_max <- max(data[, 9]) / 3
-data_cap <- data[data$Capacity <= cap_max, c(9,10)]
-cap_mean <- mean(data_cap[, 1])
-fuzzy_cap <- f(cap_min, cap_max, cap_mean, data_cap, 0)
-
-data_cap1 <- data[data$Capacity > cap_max & data$Capacity <= cap_max * 2, c(9,10)]
-cap_mean1 <- mean(data_cap1[, 1])
-fuzzy_cap1 <- f(cap_max, cap_max * 2, cap_mean1, data_cap1, 1)
-
-data_cap2 <- data[data$Capacity > cap_max * 2 & data$Capacity <= cap_max * 3, c(9,10)]
-cap_mean2 <- mean(data_cap2[, 1])
-fuzzy_cap2 <- f(cap_max*2, cap_max * 3, cap_mean2, data_cap2, 2)
-
-x <- rbind(fuzzy_cap, fuzzy_cap1, fuzzy_cap2)
-data[, 9] <- x[order(x[,2]), 1]
-
-# ������� � ��������� ��������� ��� Grade
-mins <- min(data[, 2]) - 1
-maxs <- max(data[, 2]) / 3
-data_ <- data[data$Grade <= maxs, c(2,10)]
-means <- mean(data_[, 1])
-fuzzy <- f(mins, maxs, means, data_, 0)
-
-data1 <- data[data$Grade > maxs & data$Grade <= maxs * 2, c(2,10)]
-means1 <- mean(data1[, 1])
-fuzzy1 <- f(maxs, maxs * 2, means1, data1, 1)
-
-data2 <- data[data$Grade > maxs * 2 & data$Grade <= maxs * 3, c(2,10)]
-means2 <- mean(data2[, 1])
-fuzzy2 <- f(maxs*2, maxs * 3, means2, data2, 2)
-
-x <- rbind(fuzzy, fuzzy1, fuzzy2)
-data[, 2] <- x[order(x[,2]), 1]
-
-# ������� � ��������� ��������� ��� Trucks
-mins <- min(data[, 3]) - 3
-maxs <- max(data[, 3]) / 3
-data_ <- data[data$Trucks <= maxs, c(3,10)]
-means <- mean(data_[, 1])
-fuzzy <- f(mins, maxs, means, data_, 0)
-
-data1 <- data[data$Trucks > maxs & data$Trucks <= maxs * 2, c(3,10)]
-means1 <- mean(data1[, 1])
-fuzzy1 <- f(maxs, maxs * 2, means1, data1, 1)
-
-data2 <- data[data$Trucks > maxs * 2 & data$Trucks <= maxs * 3, c(3,10)]
-means2 <- mean(data2[, 1])
-fuzzy2 <- f(maxs*2, maxs * 3, means2, data2, 2)
-
-x <- rbind(fuzzy, fuzzy1, fuzzy2)
-data[, 3] <- x[order(x[,2]), 1]
-
-# ������� � ��������� ��������� ��� NumLanes
-#mins <- min(data[, 5])
-#maxs <- max(data[, 5]) / 3
-#data_ <- data[data$NumLanes <= maxs, c(5,10)]
-#means <- mean(data_[, 1])
-#fuzzy <- f(mins, maxs, means, data_, 0)
-#
-#data1 <- data[data$NumLanes > maxs & data$NumLanes <= maxs * 2, c(5,10)]
-#means1 <- mean(data1[, 1])
-#fuzzy1 <- f(maxs, maxs * 2, means1, data1, 1)
-#
-#data2 <- data[data$NumLanes > maxs * 2 & data$NumLanes <= maxs * 3, c(5,10)]
-#means2 <- mean(data2[, 1])
-#fuzzy2 <- f(maxs*2, maxs * 3, means2, data2, 2)
-#
-#x <- rbind(fuzzy, fuzzy1, fuzzy2)
-#data[, 5] <- x[order(x[,2]), 1]
-
-# ������� � ��������� ��������� ��� Width
-mins <- min(data[, 6])
-maxs <- max(data[, 6]) / 3
-data_ <- data[data$Width <= maxs, c(6,10)]
-means <- mean(data_[, 1])
-fuzzy <- f(mins, maxs, means, data_, 0)
-
-data1 <- data[data$Width > maxs & data$Width <= maxs * 2, c(6,10)]
-means1 <- mean(data1[, 1])
-fuzzy1 <- f(maxs, maxs * 2, means1, data1, 1)
-
-data2 <- data[data$Width > maxs * 2 & data$Width <= maxs * 3, c(6,10)]
-means2 <- mean(data2[, 1])
-fuzzy2 <- f(maxs*2, maxs * 3, means2, data2, 2)
-
-x <- rbind(fuzzy, fuzzy1, fuzzy2)
-data[, 6] <- x[order(x[,2]), 1]
-
-# �������� ������� Work
-data_fin <- cbind(data[, 1:3], data[, 5:9])
-
-data <- data_fin
-
-# ����������� ��� Location, Grade, Trucks, Width, Capacity
-a <- fuzz(data, 1)
-colnames(a)[1] <- 'Location_rural'
-colnames(a)[2] <- 'Location_urban'
-
-g <- fuzz(data, 2)
-colnames(g)[1] <- 'Grade_min'
-colnames(g)[2] <- 'Grade_means'
-colnames(g)[3] <- 'Grade_max'
-
-t <- fuzz(data, 3)
-colnames(t)[1] <- 'Trucks_min'
-colnames(t)[2] <- 'Trucks_means'
-colnames(t)[3] <- 'Trucks_max'
-
-z <- fuzz1(data, 4)
-colnames(z)[1] <- 'NumLanes_min'
-colnames(z)[2] <- 'NumLanes_Belmeans'
-colnames(z)[3] <- 'NumLanes_Abomeans'
-colnames(z)[4] <- 'NumLanes_max'
-
-w <- fuzz(data, 5)
-colnames(w)[1] <- 'Width_min'
-colnames(w)[2] <- 'Width_means'
-colnames(w)[3] <- 'Width_max'
-
-v <- fuzz(data, 6)
-colnames(v)[1] <- 'Reduced_yes'
-colnames(v)[2] <- 'Reduced_no'
-
-b <- fuzz(data, 7)
-colnames(b)[1] <- 'SpeedLimit_min'
-colnames(b)[2] <- 'SpeedLimit_max'
-
-c <- fuzz(data, 8)
-colnames(c)[1] <- 'Capacity_min'
-colnames(c)[2] <- 'Capacity_means'
-colnames(c)[3] <- 'Capacity_max'
-
-data <- cbind(a[,1:2], g, t, z[,1:4], w, v[,1:2], b[,1:2], c)
-#colnames(data)[9] <- 'NumLanes'
-#View(data)
-
-# �������� ����������
-kol <- 0
-koef <- 0
-j <- 0
-len <- length(data[,1])
-for(h in 1:(len-1)){
-  for(k in (h+1):len){
-    for(i in 1:length(data[1,])){
-      if(Mod(data[h-j, i] - data[k-j, i]) <= koef) {kol <- kol + 1}
+# Функции для генерации комплексных правил
+generate_comprehensive_rule <- function(fuzzy_row, original_row, row_index) {
+  tryCatch({
+    conditions <- c()
+    
+    # ПЕРЕКРЕСТОК 1
+    if(fuzzy_row['Intensity_In_1_low'] == 1) conditions <- c(conditions, "вход1=низкий")
+    if(fuzzy_row['Intensity_In_1_medium'] == 1) conditions <- c(conditions, "вход1=средний")
+    if(fuzzy_row['Intensity_In_1_high'] == 1) conditions <- c(conditions, "вход1=высокий")
+    
+    if(fuzzy_row['Intensity_Straight_1_low'] == 1) conditions <- c(conditions, "прямо1=низкое")
+    if(fuzzy_row['Intensity_Straight_1_medium'] == 1) conditions <- c(conditions, "прямо1=среднее")
+    if(fuzzy_row['Intensity_Straight_1_high'] == 1) conditions <- c(conditions, "прямо1=высокое")
+    
+    if(fuzzy_row['Intensity_Right_1_low'] == 1) conditions <- c(conditions, "направо1=низкое")
+    if(fuzzy_row['Intensity_Right_1_medium'] == 1) conditions <- c(conditions, "направо1=среднее")
+    if(fuzzy_row['Intensity_Right_1_high'] == 1) conditions <- c(conditions, "направо1=высокое")
+    
+    if(fuzzy_row['Green_Time_1_low'] == 1) conditions <- c(conditions, "зеленый1=короткий")
+    if(fuzzy_row['Green_Time_1_medium'] == 1) conditions <- c(conditions, "зеленый1=средний")
+    if(fuzzy_row['Green_Time_1_high'] == 1) conditions <- c(conditions, "зеленый1=длинный")
+    
+    # ПЕРЕКРЕСТОК 2
+    if(fuzzy_row['Intensity_In_2_low'] == 1) conditions <- c(conditions, "вход2=низкий")
+    if(fuzzy_row['Intensity_In_2_medium'] == 1) conditions <- c(conditions, "вход2=средний")
+    if(fuzzy_row['Intensity_In_2_high'] == 1) conditions <- c(conditions, "вход2=высокий")
+    
+    if(fuzzy_row['Intensity_Straight_2_low'] == 1) conditions <- c(conditions, "прямо2=низкое")
+    if(fuzzy_row['Intensity_Straight_2_medium'] == 1) conditions <- c(conditions, "прямо2=среднее")
+    if(fuzzy_row['Intensity_Straight_2_high'] == 1) conditions <- c(conditions, "прямо2=высокое")
+    
+    if(fuzzy_row['Intensity_Right_2_low'] == 1) conditions <- c(conditions, "направо2=низкое")
+    if(fuzzy_row['Intensity_Right_2_medium'] == 1) conditions <- c(conditions, "направо2=среднее")
+    if(fuzzy_row['Intensity_Right_2_high'] == 1) conditions <- c(conditions, "направо2=высокое")
+    
+    if(fuzzy_row['Green_Time_2_low'] == 1) conditions <- c(conditions, "зеленый2=короткий")
+    if(fuzzy_row['Green_Time_2_medium'] == 1) conditions <- c(conditions, "зеленый2=средний")
+    if(fuzzy_row['Green_Time_2_high'] == 1) conditions <- c(conditions, "зеленый2=длинный")
+    
+    # ЗАКЛЮЧЕНИЕ (ОБЩАЯ НАГРУЗКА)
+    conclusion <- ""
+    if(fuzzy_row['Total_Intensity_low'] == 1) conclusion <- "нагрузка=низкая"
+    if(fuzzy_row['Total_Intensity_medium'] == 1) conclusion <- "нагрузка=средняя"
+    if(fuzzy_row['Total_Intensity_high'] == 1) conclusion <- "нагрузка=высокая"
+    
+    # ФОРМИРУЕМ ПРАВИЛО
+    if(length(conditions) > 0 & conclusion != "") {
+      rule <- paste("ЕСЛИ", paste(conditions, collapse = " И "), 
+                    "ТО", conclusion)
+      return(rule)
+    } else {
+      return(paste("Маршрут", row_index, ": Неполные данные для формирования правила"))
     }
-    if(kol == 22) {
-      data <- data[-(h-j),]
-      j <- j + 1
-      kol <- 0
-      break
+    
+  }, error = function(e) {
+    return(paste("Ошибка в маршруте", row_index, ":", e$message))
+  })
+}
+
+# Функция для человеко-понятных правил
+generate_human_readable_rule <- function(fuzzy_row, original_row, row_index) {
+  tryCatch({
+    conditions <- c()
+    
+    # Перекресток 1 - более понятные формулировки
+    if(fuzzy_row['Intensity_In_1_high'] == 1) conditions <- c(conditions, "на_входе_1_много_машин")
+    if(fuzzy_row['Intensity_Straight_1_high'] == 1) conditions <- c(conditions, "прямо_1_сильная_нагрузка")
+    if(fuzzy_row['Intensity_Right_1_high'] == 1) conditions <- c(conditions, "направо_1_интенсивный_поток")
+    if(fuzzy_row['Green_Time_1_low'] == 1) conditions <- c(conditions, "зеленый_1_короткий")
+    
+    if(fuzzy_row['Intensity_In_1_medium'] == 1) conditions <- c(conditions, "на_входе_1_средняя_нагрузка")
+    if(fuzzy_row['Intensity_Straight_1_medium'] == 1) conditions <- c(conditions, "прямо_1_умеренная_нагрузка")
+    if(fuzzy_row['Green_Time_1_medium'] == 1) conditions <- c(conditions, "зеленый_1_средний")
+    
+    if(fuzzy_row['Intensity_In_1_low'] == 1) conditions <- c(conditions, "на_входе_1_мало_машин")
+    if(fuzzy_row['Intensity_Straight_1_low'] == 1) conditions <- c(conditions, "прямо_1_слабая_нагрузка")
+    if(fuzzy_row['Green_Time_1_high'] == 1) conditions <- c(conditions, "зеленый_1_длинный")
+    
+    # Перекресток 2
+    if(fuzzy_row['Intensity_In_2_high'] == 1) conditions <- c(conditions, "на_входе_2_много_машин")
+    if(fuzzy_row['Intensity_Straight_2_high'] == 1) conditions <- c(conditions, "прямо_2_сильная_нагрузка")
+    if(fuzzy_row['Intensity_Right_2_high'] == 1) conditions <- c(conditions, "направо_2_интенсивный_поток")
+    if(fuzzy_row['Green_Time_2_low'] == 1) conditions <- c(conditions, "зеленый_2_короткий")
+    
+    if(fuzzy_row['Intensity_In_2_medium'] == 1) conditions <- c(conditions, "на_входе_2_средняя_нагрузка")
+    if(fuzzy_row['Intensity_Straight_2_medium'] == 1) conditions <- c(conditions, "прямо_2_умеренная_нагрузка")
+    if(fuzzy_row['Green_Time_2_medium'] == 1) conditions <- c(conditions, "зеленый_2_средний")
+    
+    if(fuzzy_row['Intensity_In_2_low'] == 1) conditions <- c(conditions, "на_входе_2_мало_машин")
+    if(fuzzy_row['Intensity_Straight_2_low'] == 1) conditions <- c(conditions, "прямо_2_слабая_нагрузка")
+    if(fuzzy_row['Green_Time_2_high'] == 1) conditions <- c(conditions, "зеленый_2_длинный")
+    
+    # Заключение
+    conclusion <- ""
+    if(fuzzy_row['Total_Intensity_high'] == 1) conclusion <- "общая_нагрузка=высокая"
+    if(fuzzy_row['Total_Intensity_medium'] == 1) conclusion <- "общая_нагрузка=средняя"
+    if(fuzzy_row['Total_Intensity_low'] == 1) conclusion <- "общая_нагрузка=низкая"
+    
+    if(length(conditions) > 0 & conclusion != "") {
+      rule <- paste("Маршрут", row_index, ": ЕСЛИ", paste(conditions, collapse = " И "), 
+                    "ТО", conclusion)
+      return(rule)
+    } else {
+      return(paste("Маршрут", row_index, ": недостаточно_данных"))
     }
-    kol <- 0
+    
+  }, error = function(e) {
+    return(paste("Ошибка:", e$message))
+  })
+}
+
+# Функция для приоритетных правил
+generate_priority_rule <- function(fuzzy_row, original_row, row_index) {
+  tryCatch({
+    # Выбираем только наиболее значимые условия (не более 6)
+    priority_conditions <- c()
+    
+    # Приоритет 1: Высокие интенсивности
+    if(fuzzy_row['Intensity_In_1_high'] == 1) priority_conditions <- c(priority_conditions, "вход1=высокий")
+    if(fuzzy_row['Intensity_In_2_high'] == 1) priority_conditions <- c(priority_conditions, "вход2=высокий")
+    
+    # Приоритет 2: Короткие времена зеленого
+    if(fuzzy_row['Green_Time_1_low'] == 1) priority_conditions <- c(priority_conditions, "зеленый1=короткий")
+    if(fuzzy_row['Green_Time_2_low'] == 1) priority_conditions <- c(priority_conditions, "зеленый2=короткий")
+    
+    # Приоритет 3: Высокие прямые потоки
+    if(fuzzy_row['Intensity_Straight_1_high'] == 1 && length(priority_conditions) < 6) {
+      priority_conditions <- c(priority_conditions, "прямо1=высокое")
+    }
+    if(fuzzy_row['Intensity_Straight_2_high'] == 1 && length(priority_conditions) < 6) {
+      priority_conditions <- c(priority_conditions, "прямо2=высокое")
+    }
+    
+    # Приоритет 4: Средние значения (если есть место)
+    if(length(priority_conditions) < 4) {
+      if(fuzzy_row['Intensity_In_1_medium'] == 1) priority_conditions <- c(priority_conditions, "вход1=средний")
+      if(fuzzy_row['Intensity_In_2_medium'] == 1) priority_conditions <- c(priority_conditions, "вход2=средний")
+    }
+    
+    # Заключение
+    conclusion <- ""
+    if(fuzzy_row['Total_Intensity_high'] == 1) conclusion <- "нагрузка=высокая"
+    if(fuzzy_row['Total_Intensity_medium'] == 1) conclusion <- "нагрузка=средняя"
+    if(fuzzy_row['Total_Intensity_low'] == 1) conclusion <- "нагрузка=низкая"
+    
+    if(length(priority_conditions) > 0 & conclusion != "") {
+      rule <- paste("ЕСЛИ", paste(priority_conditions, collapse = " И "), 
+                    "ТО", conclusion)
+      return(rule)
+    } else {
+      return(paste("Маршрут", row_index, ": невозможно_сформировать_правило"))
+    }
+    
+  }, error = function(e) {
+    return(paste("Ошибка:", e$message))
+  })
+}
+
+# Функция формирования правил из нейросети (для обратной совместимости)
+generate_rules <- function(rez, target_var) {
+  tryCatch({
+    w <- garson(rez)
+    pr_sort <- table(w$data[order(w$data[,1]),])
+    
+    sr <- array(0, dim = min(8, ncol(pr_sort)))
+    x <- max(grep(target_var, colnames(pr_sort)))
+    
+    for(j in 1:length(sr)){
+      if(x > 0 && x <= ncol(pr_sort)) {
+        punkt <- colnames(pr_sort)[x]
+        symblos <- substr(punkt, start = 1, stop = 5)
+        c <- grep(symblos, colnames(pr_sort))
+        if(length(c) > 0) {
+          pr_sort <- pr_sort[-c, -c, drop = FALSE]
+        }
+        
+        num_s <- gregexpr("_", punkt)[[1]][1] 
+        if(num_s > 0) {
+          substr(punkt, start = num_s, stop = num_s) <- "="
+        }
+        sr[j] <- punkt
+        if(j < length(sr) && ncol(pr_sort) > 0) {
+          x <- ncol(pr_sort)
+        }
+      }
+    }
+    
+    pr <- "если:"
+    if(length(sr) > 1) {
+      for(i in 2:length(sr)){
+        if(sr[i] != "") {
+          pr <- paste(pr, sr[i]) 
+        }
+      }
+      pr <- paste(pr, "то:", sr[1])
+    }
+    return(pr)
+  }, error = function(e) {
+    return(paste("Ошибка при формировании правил:", e$message))
+  })
+}
+
+# ОСНОВНОЙ КОД
+
+# ЗАГРУЗКА ДАННЫХ
+print("Загрузка файла input.xlsx...")
+
+input_file <- "input.xlsx"
+
+if (!file.exists(input_file)) {
+  stop(paste("Файл", input_file, "не найден в рабочей директории:", getwd()))
+}
+
+data <- read.xlsx(input_file, sheet = 1, startRow = 1, rows = 1:40, colNames = TRUE)
+
+print(paste("Успешно загружен файл:", input_file))
+print(paste("Загружено строк:", nrow(data), "столбцов:", ncol(data)))
+
+# Проверяем структуру данных
+print("Структура данных:")
+print(colnames(data))
+print(dim(data))
+
+# Если данных меньше 9 столбцов, добавляем недостающие
+if(ncol(data) < 9) {
+  print(paste("Обнаружено столбцов:", ncol(data), ". Добавляю недостающие..."))
+  for(i in (ncol(data)+1):9) {
+    data[[paste0("Column", i)]] <- NA
   }
 }
-data_past <- data
 
+# Добавление столбца с номером строки
+data <- cbind(data, 1:nrow(data))
+colnames(data)[10] <- 'Row_Number'
 
-# �������� ������ Trucks
-data <- data_past
-p <- vec(data, 5, 3)
-data <- cbind(data[, 1:22], p)
-colnames(data)[23] <- 'Trucks'
-
-# ��������� � ������������ ������ � ������� Trucks
-regulation <- c()
-regulations <- c()
-#prov <- c()
-#while(is.element('Trucks=min', prov) == FALSE || is.element('Trucks=means', prov) == FALSE || is.element('Trucks=max', prov) == FALSE){
-for(i in 1:10){
-  # ������������, ��������� �� �������� � ��������� �������
-  index <- sample(1:nrow(data), round(0.15*nrow(data)))
-  train <- data[-index,]
-  test <- data[index,]
-  
-  scaled <- (scale(data))
-  train_ <- scaled[-index,]
-  test_ <- scaled[index,]
-  
-  # ��������� ��� Trucks � ����� ��������
-  rez <- neuralnet(Trucks ~ Location_rural + Location_urban + Grade_min + Grade_means + Grade_max + Capacity_min + Capacity_means + Capacity_max + NumLanes_min + NumLanes_Belmeans + NumLanes_Abomeans + NumLanes_max + Width_min + Width_means + Width_max + Reduced_yes + Reduced_no + Trucks_min + Trucks_means + Trucks_max + SpeedLimit_min + SpeedLimit_max, data = train_, algorithm='rprop+',hidden=5, act.fct="tanh", err.fct = "sse", linear.output = F)
-  un <- train_
-  un[,23] <- as.numeric(rez$net.result[[1]][,1])
-  train_ <- scale(train)
-  scaleList <- list(scale = attr(train_, "scaled:scale"), center = attr(train_, "scaled:center"))
-  un[,23]*scaleList$scale["Trucks"] + scaleList$center["Trucks"]
-  comp1 <- data.frame(ish=train[,23], fit=un[,23]*scaleList$scale["Trucks"] + scaleList$center["Trucks"])
-  #plot(rez)
-  
-  # ������������ ������ � ������� ��������������� ������
-  weght_hide <- rez$weights[[1]][[2]]
-  weght_hide <- weght_hide[-1,]
-  weght_hide <- which.max(weght_hide == max(weght_hide))
-  
-  alt_method <- rez$weights[[1]][[1]]
-  alt_method <- alt_method[-1,]
-  alt_method <- alt_method[,weght_hide]
-  
-  vx <- rez$model.list$variables
-  sr <- array(0, dim = 8)
-  
-  for(j in 1:8){
-    ind <- which.max(alt_method == max(alt_method))
-    punkt <- vx[ind] 
-    symblos <- substr(punkt, start = 1, stop = 5)
-    c <- grep(symblos, vx)
-    vx <- vx[-c]
-    alt_method <- alt_method[-c]
-    
-    num_s <- gregexpr("_", punkt)[[1]][1]
-    substr(punkt, start = num_s, stop = num_s) <- "="
-    sr[j] <- punkt
-    #if(j < 8){x <- length(pr_sort[,1])}
-    
-  }
-  zi <- sr[grep("Trucks", sr)]
-  sr <- sr[-grep("Trucks", sr)]
-  pr <- "����:"
-  for(i in 1:length(sr)){
-    pr <- paste(pr, sr[i]) 
-  }
-  pr <- paste(pr, "��:", zi)
-  #View(pr)
-  regulation <- c(regulation, pr)
-  
-  
-  # ������������ ������ � ������� ������ �������
-  w <- garson(rez)
-  #plot(w)
-  pr_sort <- table(w$data[order(w$data[,1]),])
-  #pr_sort <- pr_sort[-match("NumLanes", colnames(pr_sort)), -match("NumLanes", colnames(pr_sort))]
-  sr <- array(0, dim = 8)
-  x <- max(grep("Trucks", colnames(pr_sort)))
-  j <- 1
-  for(j in 1:8){
-    punkt <- colnames(pr_sort)[x]
-    symblos <- substr(punkt, start = 1, stop = 5)
-    c <- grep(symblos, colnames(pr_sort))
-    pr_sort <- pr_sort[-c, -c]
-    
-    num_s <- gregexpr("_", punkt)[[1]][1] 
-    substr(punkt, start = num_s, stop = num_s) <- "="
-    sr[j] <- punkt
-    if(j < 8){x <- length(pr_sort[,1])}
-  }
-  #View(sr)
-  
-  pr <- "����:"
-  for(i in 2:length(sr)){
-    pr <- paste(pr, sr[i]) 
-  }
-  pr <- paste(pr, "��:", sr[1])
-  #View(pr)
-  #prov <- c(prov, sr[1]) 
-  regulations <- c(regulations, pr)
-}  
-writeWorksheetToFile("Test.xlsx", data = cbind(regulation, regulations), sheet = "����1")
-
-
-# �������� ������ SpeedLimit
-data <- data_past
-p <- vec(data, 17, 2)
-data <- cbind(data[, 1:22], p)
-colnames(data)[23] <- 'SpeedLimit'
-
-# ��������� � ������������ ������ � ������� SpeedLimit
-regulation1 <- c()
-regulations1 <- c()
-#prov <- c()
-#while(is.element('SpeedLimit=min', prov) == FALSE || is.element('SpeedLimit=max', prov) == FALSE){
-for(i in 1:10){
-  # ������������, ��������� �� �������� � ��������� �������
-  index <- sample(1:nrow(data), round(0.15*nrow(data)))
-  train <- data[-index,]
-  test <- data[index,]
-  
-  scaled <- (scale(data))
-  train_ <- scaled[-index,]
-  test_ <- scaled[index,]
-  
-  # ��������� ��� SpeedLimit � ����� ��������
-  rez <- neuralnet(SpeedLimit ~ Location_rural + Location_urban + Grade_min + Grade_means + Grade_max + Capacity_min + Capacity_means + Capacity_max + NumLanes_min + NumLanes_Belmeans + NumLanes_Abomeans + NumLanes_max + Width_min + Width_means + Width_max + Reduced_yes + Reduced_no + SpeedLimit_min + SpeedLimit_max + Trucks_min + Trucks_means + Trucks_max, data = train_, algorithm='rprop+',hidden=5, act.fct="tanh", err.fct = "sse", linear.output = F)
-  un <- train_
-  un[,23] <- as.numeric(rez$net.result[[1]][,1])
-  train_ <- scale(train)
-  scaleList <- list(scale = attr(train_, "scaled:scale"), center = attr(train_, "scaled:center"))
-  un[,23]*scaleList$scale["SpeedLimit"] + scaleList$center["SpeedLimit"]
-  comp1 <- data.frame(ish=train[,23], fit=un[,23]*scaleList$scale["SpeedLimit"] + scaleList$center["SpeedLimit"])
-  #plot(rez)
-  
-  # ������������ ������ � ������� ��������������� ������
-  weght_hide <- rez$weights[[1]][[2]]
-  weght_hide <- weght_hide[-1,]
-  weght_hide <- which.max(weght_hide == max(weght_hide))
-  
-  alt_method <- rez$weights[[1]][[1]]
-  alt_method <- alt_method[-1,]
-  alt_method <- alt_method[,weght_hide]
-  
-  vx <- rez$model.list$variables
-  sr <- array(0, dim = 8)
-  
-  for(j in 1:8){
-    ind <- which.max(alt_method == max(alt_method))
-    punkt <- vx[ind] 
-    symblos <- substr(punkt, start = 1, stop = 5)
-    c <- grep(symblos, vx)
-    vx <- vx[-c]
-    alt_method <- alt_method[-c]
-    
-    num_s <- gregexpr("_", punkt)[[1]][1]
-    substr(punkt, start = num_s, stop = num_s) <- "="
-    sr[j] <- punkt
-    #if(j < 8){x <- length(pr_sort[,1])}
-    
-  }
-  zi <- sr[grep("SpeedLimit", sr)]
-  sr <- sr[-grep("SpeedLimit", sr)]
-  pr <- "����:"
-  for(i in 1:length(sr)){
-    pr <- paste(pr, sr[i]) 
-  }
-  pr <- paste(pr, "��:", zi)
-  #View(pr)
-  regulation1 <- c(regulation1, pr)
-  
-  
-  # ������������ ������ � ������� ������ �������
-  w <- garson(rez)
-  #plot(w)
-  pr_sort <- table(w$data[order(w$data[,1]),])
-  #pr_sort <- pr_sort[-match("NumLanes", colnames(pr_sort)), -match("NumLanes", colnames(pr_sort))]
-  sr <- array(0, dim = 8)
-  x <- max(grep("SpeedLimit", colnames(pr_sort)))
-  for(j in 1:8){
-    punkt <- colnames(pr_sort)[x]
-    
-    symblos <- substr(punkt, start = 1, stop = 5)
-    c <- grep(symblos, colnames(pr_sort))
-    pr_sort <- pr_sort[-c, -c]
-    
-    num_s <- gregexpr("_", punkt)[[1]][1] 
-    substr(punkt, start = num_s, stop = num_s) <- "="
-    sr[j] <- punkt
-    if(j < 8){x <- length(pr_sort[,1])}
-  }
-  #View(sr)
-  
-  pr <- "����:"
-  for(i in 2:length(sr)){
-    pr <- paste(pr, sr[i]) 
-  }
-  pr <- paste(pr, "��:", sr[1])
-  #View(pr)
-  #prov <- c(prov, sr[1]) 
-  regulations1 <- c(regulations1, pr)
-}  
-writeWorksheetToFile("Test1.xlsx", data = cbind(regulation1, regulations1), sheet = "����1")
-
-
-# �������� ������ NumLanes
-data <- data_past
-p <- vec(data, 8, 4)
-data <- cbind(data[, 1:22], p)
-colnames(data)[23] <- 'NumLanes'
-
-# ��������� � ������������ ������ � ������� NumLanes
-regulation2 <- c()
-regulations2 <- c()
-#prov <- c()
-data <- data[-1,-9]
-data <- data[-c(28,29),-11]
-data <- data[,-18]
-#while(is.element('SpeedLimit=min', prov) == FALSE || is.element('SpeedLimit=max', prov) == FALSE){
-for(i in 1:20){
-  # ������������, ��������� �� �������� � ��������� �������
-  index <- sample(1:nrow(data), round(0.15*nrow(data)))
-  train <- data[-index,]
-  test <- data[index,]
-  
-  scaled <- (scale(data))
-  train_ <- scaled[-index,]
-  test_ <- scaled[index,]
-  
-  # ��������� ��� NumLanes � ����� ��������
-  rez <- neuralnet(NumLanes ~ Location_rural + Location_urban + Grade_min + Grade_means + Grade_max + Capacity_means + Capacity_max + NumLanes_Belmeans + NumLanes_Abomeans + Width_min + Width_means + Width_max + Reduced_yes + Reduced_no + SpeedLimit_min + SpeedLimit_max + Trucks_min + Trucks_means + Trucks_max, data = train_, algorithm='rprop+',hidden=5, act.fct="tanh", err.fct = "sse", linear.output = F)
-  un <- train_
-  un[,20] <- as.numeric(rez$net.result[[1]][,1])
-  train_ <- scale(train)
-  scaleList <- list(scale = attr(train_, "scaled:scale"), center = attr(train_, "scaled:center"))
-  un[,20]*scaleList$scale["NumLanes"] + scaleList$center["NumLanes"]
-  comp1 <- data.frame(ish=train[,20], fit=un[,20]*scaleList$scale["NumLanes"] + scaleList$center["NumLanes"])
-  #plot(rez)
-  
-  # ������������ ������ � ������� ��������������� ������
-  weght_hide <- rez$weights[[1]][[2]]
-  weght_hide <- weght_hide[-1,]
-  weght_hide <- which.max(weght_hide == max(weght_hide))
-  
-  alt_method <- rez$weights[[1]][[1]]
-  alt_method <- alt_method[-1,]
-  alt_method <- alt_method[,weght_hide]
-  
-  vx <- rez$model.list$variables
-  sr <- array(0, dim = 8)
-  
-  for(j in 1:8){
-    ind <- which.max(alt_method == max(alt_method))
-    punkt <- vx[ind] 
-    symblos <- substr(punkt, start = 1, stop = 5)
-    c <- grep(symblos, vx)
-    vx <- vx[-c]
-    alt_method <- alt_method[-c]
-    
-    num_s <- gregexpr("_", punkt)[[1]][1]
-    substr(punkt, start = num_s, stop = num_s) <- "="
-    sr[j] <- punkt
-    #if(j < 8){x <- length(pr_sort[,1])}
-    
-  }
-  zi <- sr[grep("NumLanes", sr)]
-  sr <- sr[-grep("NumLanes", sr)]
-  pr <- "����:"
-  for(i in 1:length(sr)){
-    pr <- paste(pr, sr[i]) 
-  }
-  pr <- paste(pr, "��:", zi)
-  #View(pr)
-  regulation2 <- c(regulation2, pr)
-  
-  
-  # ������������ ������ � ������� ������ �������
-  w <- garson(rez)
-  #plot(w)
-  pr_sort <- table(w$data[order(w$data[,1]),])
-  #pr_sort <- pr_sort[-match("NumLanes", colnames(pr_sort)), -match("NumLanes", colnames(pr_sort))]
-  sr <- array(0, dim = 8)
-  x <- max(grep("NumLanes", colnames(pr_sort)))
-  for(j in 1:8){
-    punkt <- colnames(pr_sort)[x]
-    
-    symblos <- substr(punkt, start = 1, stop = 5)
-    c <- grep(symblos, colnames(pr_sort))
-    pr_sort <- pr_sort[-c, -c]
-    
-    num_s <- gregexpr("_", punkt)[[1]][1] 
-    substr(punkt, start = num_s, stop = num_s) <- "="
-    sr[j] <- punkt
-    if(j < 8){x <- length(pr_sort[,1])}
-  }
-  #View(sr)
-  
-  pr <- "����:"
-  for(i in 2:length(sr)){
-    pr <- paste(pr, sr[i]) 
-  }
-  pr <- paste(pr, "��:", sr[1])
-  #View(pr)
-  #prov <- c(prov, sr[1]) 
-  regulations2 <- c(regulations2, pr)
+# Переименование столбцов для удобства
+if(ncol(data) >= 9) {
+  colnames(data)[1:9] <- c('Intensity_In_1', 'Intensity_Straight_1', 'Intensity_Right_1', 
+                           'Green_Time_1', 'Intensity_In_2', 'Intensity_Straight_2', 
+                           'Intensity_Right_2', 'Green_Time_2', 'Total_Intensity')
 }
-writeWorksheetToFile("Test2.xlsx", data = cbind(regulation2, regulations2), sheet = "����1")
 
+print("Столбцы переименованы:")
+print(colnames(data))
 
+# ФАЗЗИФИКАЦИЯ
+print("Начало фаззификации...")
 
-#writeWorksheetToFile("Test.xlsx", data = c(regulations, regulations1, regulations2), sheet = "����1")
+# Применяем фаззификацию ко всем столбцам
+intensity_in_1 <- fuzz_intensity(data, 1)
+intensity_straight_1 <- fuzz_intensity(data, 2)
+intensity_right_1 <- fuzz_intensity(data, 3)
+green_time_1 <- fuzz_green_time(data, 4)
+intensity_in_2 <- fuzz_intensity(data, 5)
+intensity_straight_2 <- fuzz_intensity(data, 6)
+intensity_right_2 <- fuzz_intensity(data, 7)
+green_time_2 <- fuzz_green_time(data, 8)
+total_intensity <- fuzz_intensity(data, 9)
 
+# Собираем все данные вместе
+data_fuzzy <- cbind(
+  intensity_in_1[,2:4],
+  intensity_straight_1[,2:4],
+  intensity_right_1[,2:4],
+  green_time_1[,2:4],
+  intensity_in_2[,2:4],
+  intensity_straight_2[,2:4],
+  intensity_right_2[,2:4],
+  green_time_2[,2:4],
+  total_intensity[,2:4],
+  data[,10]
+)
 
-# �������� ����� ��� ��� ������ ��� �������
-data <- data_past
-j <- c()
-for(g in 1:length(data_past[,1])){
-  if(data_past[g,16] == 0){
-    j <- c(j, g)
+colnames(data_fuzzy) <- c(
+  'Intensity_In_1_low', 'Intensity_In_1_medium', 'Intensity_In_1_high',
+  'Intensity_Straight_1_low', 'Intensity_Straight_1_medium', 'Intensity_Straight_1_high',
+  'Intensity_Right_1_low', 'Intensity_Right_1_medium', 'Intensity_Right_1_high',
+  'Green_Time_1_low', 'Green_Time_1_medium', 'Green_Time_1_high',
+  'Intensity_In_2_low', 'Intensity_In_2_medium', 'Intensity_In_2_high',
+  'Intensity_Straight_2_low', 'Intensity_Straight_2_medium', 'Intensity_Straight_2_high',
+  'Intensity_Right_2_low', 'Intensity_Right_2_medium', 'Intensity_Right_2_high',
+  'Green_Time_2_low', 'Green_Time_2_medium', 'Green_Time_2_high',
+  'Total_Intensity_low', 'Total_Intensity_medium', 'Total_Intensity_high',
+  'Row_Number'
+)
+
+print("Фаззификация завершена!")
+print(paste("Фаззифицированные данные:", nrow(data_fuzzy), "строк,", ncol(data_fuzzy), "столбцов"))
+
+# Удаление строк с NA
+data_fuzzy <- na.omit(data_fuzzy)
+print(paste("После удаления NA:", nrow(data_fuzzy), "строк"))
+
+# ГЕНЕРАЦИЯ КОМПЛЕКСНЫХ ПРАВИЛ ДЛЯ КАЖДОГО МАРШРУТА
+print("Генерация комплексных правил для каждого маршрута...")
+
+comprehensive_rules <- c()
+human_readable_rules <- c()
+priority_rules <- c()
+
+for(i in 1:nrow(data_fuzzy)) {
+  cat("Генерация правил для маршрута", i, "\n")
+  
+  # Метод 1: Полное правило
+  rule1 <- generate_comprehensive_rule(data_fuzzy[i, ], data[i, ], i)
+  comprehensive_rules <- c(comprehensive_rules, rule1)
+  
+  # Метод 2: Человеко-понятное правило
+  rule2 <- generate_human_readable_rule(data_fuzzy[i, ], data[i, ], i)
+  human_readable_rules <- c(human_readable_rules, rule2)
+  
+  # Метод 3: Приоритетное правило
+  rule3 <- generate_priority_rule(data_fuzzy[i, ], data[i, ], i)
+  priority_rules <- c(priority_rules, rule3)
+}
+
+# НЕЙРОННЫЕ СЕТИ (опционально, для обратной совместимости)
+print("Обучение нейросетей...")
+
+regulation_total <- c()
+regulations_total <- c()
+
+# Только если данных достаточно
+if(nrow(data_fuzzy) >= 10) {
+  data_total <- data_fuzzy
+  p_total <- vec(data_total, 25, 3)
+  data_total <- cbind(data_total[, 1:27], p_total)
+  colnames(data_total)[28] <- 'Total_Intensity_Vector'
+  
+  for(i in 1:2) {
+    tryCatch({
+      index <- sample(1:nrow(data_total), round(0.10*nrow(data_total)))
+      train <- data_total[-index,]
+      test <- data_total[index,]
+      
+      scaled <- scale(data_total)
+      train_ <- scaled[-index,]
+      test_ <- scaled[index,]
+      
+      formula_total <- as.formula(paste("Total_Intensity_Vector ~", 
+                                        paste(colnames(data_total)[1:24], collapse = " + ")))
+      
+      rez <- neuralnet(formula_total, data = train_, 
+                       algorithm = 'rprop+', 
+                       hidden = 2,
+                       act.fct = "tanh", 
+                       err.fct = "sse", 
+                       linear.output = FALSE,
+                       stepmax = 1e5)
+      
+      rule_garson <- generate_rules(rez, "Total_Intensity")
+      regulations_total <- c(regulations_total, rule_garson)
+      
+    }, error = function(e) {
+      print(paste("Ошибка в итерации", i, ":", e$message))
+    })
+  }
+} else {
+  print("Недостаточно данных для обучения нейросетей")
+}
+
+# СОХРАНЕНИЕ РЕЗУЛЬТАТОВ
+print("Сохранение результатов...")
+
+wb <- createWorkbook()
+
+# Лист с фаззифицированными данными
+addWorksheet(wb, "Фаззифицированные_данные")
+writeData(wb, "Фаззифицированные_данные", data_fuzzy)
+
+# Листы с комплексными правилами
+addWorksheet(wb, "Полные_правила")
+writeData(wb, "Полные_правила", 
+          data.frame(Маршрут = 1:length(comprehensive_rules),
+                     Правило = comprehensive_rules))
+
+addWorksheet(wb, "Понятные_правила")
+writeData(wb, "Понятные_правила",
+          data.frame(Маршрут = 1:length(human_readable_rules),
+                     Правило = human_readable_rules))
+
+addWorksheet(wb, "Приоритетные_правила")
+writeData(wb, "Приоритетные_правила",
+          data.frame(Маршрут = 1:length(priority_rules),
+                     Правило = priority_rules))
+
+# Лист с нейросетевыми правилами (если есть)
+if(length(regulations_total) > 0) {
+  addWorksheet(wb, "Нейросетевые_правила")
+  writeData(wb, "Нейросетевые_правила",
+            data.frame(Номер_правила = 1:length(regulations_total),
+                       Правило = regulations_total))
+}
+
+# Сохраняем файл
+output_file <- "Traffic_Fuzzy_Neural_Results.xlsx"
+saveWorkbook(wb, output_file, overwrite = TRUE)
+
+# ВЫВОД СТАТИСТИКИ
+print("=== РЕЗУЛЬТАТЫ МОДЕЛИРОВАНИЯ ===")
+print(paste("Исходный файл:", input_file))
+print(paste("Общее количество наблюдений:", nrow(data_fuzzy)))
+print(paste("Количество полных правил:", length(comprehensive_rules)))
+print(paste("Количество понятных правил:", length(human_readable_rules)))
+print(paste("Количество приоритетных правил:", length(priority_rules)))
+if(length(regulations_total) > 0) {
+  print(paste("Количество нейросетевых правил:", length(regulations_total)))
+}
+print(paste("Результаты сохранены в файл:", output_file))
+
+print("Анализ завершен успешно!")
+
+# Пример вывода нескольких правил
+if(length(comprehensive_rules) > 0) {
+  print("Пример полных правил:")
+  for(i in 1:min(3, length(comprehensive_rules))) {
+    print(paste(i, ":", comprehensive_rules[i]))
   }
 }
-data <- cbind(data_past[-j, 1:10], data[-j, 13:14], data_past[-j, 18:21])
 
-
-# �������� ������ NumLanes
-#data <- data_past
-p <- vec(data, 8, 2)
-data <- cbind(data[, 1:16], p)
-colnames(data)[17] <- 'NumLanes'
-
-# ��������� � ������������ ������ � ������� NumLanes
-regulations2 <- c()
-prov <- c()
-#while(is.element('NumLanes=min', prov) == FALSE || is.element('NumLanes=Belmeans', prov) == FALSE){
-for(i in 1:10){
-  # ������������, ��������� �� �������� � ��������� �������
-  index <- sample(1:nrow(data), round(0.15*nrow(data)))
-  train <- data[-index,]
-  test <- data[index,]
-  
-  scaled <- (scale(data))
-  train_ <- scaled[-index,]
-  test_ <- scaled[index,]
-  
-  # ��������� ��� NumLanes � ����� ��������
-  rez <- neuralnet(NumLanes ~ Location_rural + Location_urban + Grade_min + Grade_means + Grade_max + Capacity_min + Capacity_means + NumLanes_min + NumLanes_Belmeans + Width_min + Width_means + Trucks_min + Trucks_means + Trucks_max + SpeedLimit_min + SpeedLimit_max, data = train_, algorithm='rprop+',hidden=5, act.fct="tanh", err.fct = "sse", linear.output = F)
-  un <- train_
-  un[,17] <- as.numeric(rez$net.result[[1]][,1])
-  train_ <- scale(train)
-  scaleList <- list(scale = attr(train_, "scaled:scale"), center = attr(train_, "scaled:center"))
-  un[,17]*scaleList$scale["NumLanes"] + scaleList$center["NumLanes"]
-  comp1 <- data.frame(ish=train[,17], fit=un[,17]*scaleList$scale["NumLanes"] + scaleList$center["NumLanes"])
-  #plot(rez)
-  w <- garson(rez)
-  #plot(w)
-  
-  # ������������ ������ � ������� ������ �������
-  pr_sort <- table(w$data[order(w$data[,1]),])
-  #pr_sort <- pr_sort[-match("NumLanes", colnames(pr_sort)), -match("NumLanes", colnames(pr_sort))]
-  sr <- array(0, dim = 7)
-  x <- max(grep("NumLanes", colnames(pr_sort)))
-  for(j in 1:7){
-    punkt <- colnames(pr_sort)[x]
-    symblos <- substr(punkt, start = 1, stop = 5)
-    c <- grep(symblos, colnames(pr_sort))
-    pr_sort <- pr_sort[-c, -c]
-    
-    num_s <- gregexpr("_", punkt)[[1]][1] 
-    substr(punkt, start = num_s, stop = num_s) <- "="
-    sr[j] <- punkt
-    if(j < 7){x <- length(pr_sort[,1])}
+if(length(human_readable_rules) > 0) {
+  print("Пример понятных правил:")
+  for(i in 1:min(3, length(human_readable_rules))) {
+    print(paste(i, ":", human_readable_rules[i]))
   }
-  #View(sr)
-  
-  pr <- "����:"
-  for(i in 2:length(sr)){
-    pr <- paste(pr, sr[i]) 
-  }
-  pr <- paste(pr, "��:", sr[1])
-  #View(pr)
-  prov <- c(prov, sr[1]) 
-  regulations2 <- c(regulations2, pr)
-} 
-writeWorksheetToFile("Test.xlsx", data = c(regulations, regulations1, regulations2), sheet = "����1")
-
-
-# �������� ������ Reduced
-#data <- data_past
-p <- vec(data, 15, 2)
-data <- cbind(data[, 1:22], p)
-colnames(data)[23] <- 'Reduced'
-
-# ��������� � ������������ ������ � ������� Reduced
-regulations2 <- c()
-prov <- c()
-#while(is.element('Reduced=yes', prov) == FALSE || is.element('Reduced=no', prov) == FALSE){
-for(i in 1:10){
-  # ������������, ��������� �� �������� � ��������� �������
-  index <- sample(1:nrow(data), round(0.15*nrow(data)))
-  train <- data[-index,]
-  test <- data[index,]
-  
-  scaled <- (scale(data))
-  train_ <- scaled[-index,]
-  test_ <- scaled[index,]
-  
-  # ��������� ��� Reduced � ����� ��������
-  rez <- neuralnet(Reduced ~ Location_rural + Location_urban + Grade_min + Grade_means + Grade_max + Capacity_min + Capacity_means + Capacity_max + NumLanes_min + NumLanes_Belmeans + NumLanes_Abomeans + NumLanes_max + Width_min + Width_means + Width_max + Reduced_yes + Reduced_no + Trucks_min + Trucks_means + Trucks_max + SpeedLimit_min + SpeedLimit_max, data = train_, algorithm='rprop+',hidden=5, act.fct="tanh", err.fct = "sse", linear.output = F)
-  un <- train_
-  un[,23] <- as.numeric(rez$net.result[[1]][,1])
-  train_ <- scale(train)
-  scaleList <- list(scale = attr(train_, "scaled:scale"), center = attr(train_, "scaled:center"))
-  un[,23]*scaleList$scale["Reduced"] + scaleList$center["Reduced"]
-  comp1 <- data.frame(ish=train[,23], fit=un[,23]*scaleList$scale["Reduced"] + scaleList$center["Reduced"])
-  #plot(rez)
-  w <- garson(rez)
-  #plot(w)
-  
-  # ������������ ������ � ������� ������ �������
-  pr_sort <- table(w$data[order(w$data[,1]),])
-  #pr_sort <- pr_sort[-match("NumLanes", colnames(pr_sort)), -match("NumLanes", colnames(pr_sort))]
-  sr <- array(0, dim = 8)
-  x <- max(grep("Reduced", colnames(pr_sort)))
-  for(j in 1:8){
-    punkt <- colnames(pr_sort)[x]
-    symblos <- substr(punkt, start = 1, stop = 5)
-    c <- grep(symblos, colnames(pr_sort))
-    pr_sort <- pr_sort[-c, -c]
-    
-    num_s <- gregexpr("_", punkt)[[1]][1] 
-    substr(punkt, start = num_s, stop = num_s) <- "="
-    sr[j] <- punkt
-    if(j < 8){x <- length(pr_sort[,1])}
-  }
-  #View(sr)
-  
-  pr <- "����:"
-  for(i in 2:length(sr)){
-    pr <- paste(pr, sr[i]) 
-  }
-  pr <- paste(pr, "��:", sr[1])
-  #View(pr)
-  prov <- c(prov, sr[1]) 
-  regulations2 <- c(regulations2, pr)
-} 
-
-
-#RMSE(comp[,2], comp[,1], length(comp[,1]))
-#RMSE(comp1[,2], comp1[,1], length(comp1[,1]))
-#RMSE(comp2[,2], comp2[,1], length(comp2[,1]))
+}
